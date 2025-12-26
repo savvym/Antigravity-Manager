@@ -347,6 +347,10 @@
                 "gpt_4o": {
                     "name": "GPT-4o / 3.5 Series",
                     "desc": "GPT-4o, Mini, 3.5 Turbo"
+                },
+                "gpt_5": {
+                    "name": "GPT-5 Series",
+                    "desc": "GPT-5.1, GPT-5.2 xhigh"
                 }
             },
             "expert_title": "Expert Custom Routing",

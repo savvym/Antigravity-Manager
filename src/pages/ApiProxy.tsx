@@ -696,8 +696,8 @@ print(response.text)`;
                                                 <Zap size={16} />
                                             </div>
                                             <div>
-                                                <div className="text-xs font-bold text-gray-900 dark:text-base-content">GPT-5 系列</div>
-                                                <div className="text-[10px] text-gray-500 line-clamp-1">GPT-5.1, GPT-5.2 xhigh</div>
+                                                <div className="text-xs font-bold text-gray-900 dark:text-base-content">{t('proxy.router.groups.gpt_5.name')}</div>
+                                                <div className="text-[10px] text-gray-500 line-clamp-1">{t('proxy.router.groups.gpt_5.desc')}</div>
                                             </div>
                                         </div>
                                         <select
