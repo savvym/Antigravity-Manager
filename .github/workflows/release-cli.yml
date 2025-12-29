@@ -1,0 +1,204 @@
+name: Release CLI
+
+on:
+  push:
+    tags:
+      - 'cli-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., cli-v1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: antigravity-cli
+            asset_name: antigravity-cli-darwin-arm64
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: antigravity-cli
+            asset_name: antigravity-cli-darwin-x64
+          # Linux
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact_name: antigravity-cli
+            asset_name: antigravity-cli-linux-x64
+          - platform: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            artifact_name: antigravity-cli
+            asset_name: antigravity-cli-linux-arm64
+          # Windows
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: antigravity-cli.exe
+            asset_name: antigravity-cli-windows-x64.exe
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux x86_64)
+        if: matrix.platform == 'ubuntu-22.04' && matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev pkg-config
+
+      - name: Install dependencies (Linux ARM64 cross-compile)
+        if: matrix.platform == 'ubuntu-22.04' && matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev pkg-config
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          # 安装 ARM64 交叉编译所需的库
+          sudo dpkg --add-architecture arm64
+          sudo sed -i 's/^deb /deb [arch=amd64] /' /etc/apt/sources.list
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports jammy-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list
+          sudo apt-get update || true
+          sudo apt-get install -y libssl-dev:arm64 || true
+
+      - name: Rust setup
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Configure cargo for cross-compilation (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          mkdir -p ~/.cargo
+          cat >> ~/.cargo/config.toml << EOF
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
+      - name: Build CLI
+        run: |
+          cargo build --bin antigravity-cli --release --target ${{ matrix.target }} --manifest-path src-tauri/Cargo.toml
+        env:
+          # 对于 Linux ARM64 交叉编译
+          PKG_CONFIG_ALLOW_CROSS: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '1' || '' }}
+          PKG_CONFIG_PATH: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '/usr/lib/aarch64-linux-gnu/pkgconfig' || '' }}
+          OPENSSL_DIR: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '/usr/aarch64-linux-gnu' || '' }}
+          OPENSSL_INCLUDE_DIR: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '/usr/aarch64-linux-gnu/include' || '' }}
+          OPENSSL_LIB_DIR: ${{ matrix.target == 'aarch64-unknown-linux-gnu' && '/usr/aarch64-linux-gnu/lib' || '' }}
+
+      - name: Prepare artifact (Unix)
+        if: matrix.platform != 'windows-latest'
+        run: |
+          cp src-tauri/target/${{ matrix.target }}/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
+          chmod +x ${{ matrix.asset_name }}
+
+      - name: Prepare artifact (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: |
+          copy src-tauri\target\${{ matrix.target }}\release\${{ matrix.artifact_name }} ${{ matrix.asset_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          # 移动所有构建产物到 release 目录
+          find artifacts -type f -exec mv {} release/ \;
+          ls -la release/
+
+      - name: Create checksums
+        run: |
+          cd release
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Get tag name
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: Antigravity CLI ${{ steps.tag.outputs.tag }}
+          body: |
+            ## Antigravity CLI ${{ steps.tag.outputs.tag }}
+
+            ### Downloads
+
+            | Platform | Architecture | File |
+            |----------|--------------|------|
+            | macOS | Apple Silicon (ARM64) | `antigravity-cli-darwin-arm64` |
+            | macOS | Intel (x64) | `antigravity-cli-darwin-x64` |
+            | Linux | x64 | `antigravity-cli-linux-x64` |
+            | Linux | ARM64 | `antigravity-cli-linux-arm64` |
+            | Windows | x64 | `antigravity-cli-windows-x64.exe` |
+
+            ### Usage
+
+            ```bash
+            # 账号管理
+            antigravity-cli account list           # 列出所有账号
+            antigravity-cli account add <token>    # 添加账号
+            antigravity-cli account delete <id>    # 删除账号
+            antigravity-cli account switch <id>    # 切换账号
+            antigravity-cli account current        # 查看当前账号
+            antigravity-cli account refresh        # 刷新所有配额
+
+            # 反代服务
+            antigravity-cli proxy start [--port 8045] [--lan]  # 启动反代
+            antigravity-cli proxy stop                          # 停止反代
+            antigravity-cli proxy status                        # 查看状态
+
+            # 配置
+            antigravity-cli config show            # 显示配置
+            antigravity-cli config set <key> <val> # 设置配置
+            ```
+
+            ### Installation
+
+            **macOS / Linux:**
+            ```bash
+            # 下载后添加执行权限
+            chmod +x antigravity-cli-*
+            # 移动到 PATH
+            sudo mv antigravity-cli-* /usr/local/bin/antigravity-cli
+            ```
+
+            **Windows:**
+            下载 `.exe` 文件并添加到系统 PATH。
+          draft: true
+          prerelease: false
+          files: |
+            release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

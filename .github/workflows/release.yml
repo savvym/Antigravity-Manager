@@ -3,6 +3,7 @@ on:
   push:
     tags:
       - 'v*'
+      - '!cli-v*'  # 排除 CLI 专用标签
   workflow_dispatch:
 
 jobs:

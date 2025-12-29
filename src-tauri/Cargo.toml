@@ -15,6 +15,10 @@ edition = "2021"
 name = "antigravity_tools_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "antigravity-cli"
+path = "src/bin/cli.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -59,3 +63,7 @@ tauri-plugin-single-instance = { version = "2.3.6", features = ["deep-link"] }
 tracing-appender = "0.2.4"
 tracing-log = "0.2.0"
 tauri-plugin-autostart = "2.5.1"
+
+# CLI 依赖
+clap = { version = "4", features = ["derive"] }
+comfy-table = "7"   # 表格输出

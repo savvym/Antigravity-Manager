@@ -1,8 +1,10 @@
-mod models;
-mod modules;
 mod commands;
-mod utils;
-mod proxy;  // 反代服务模块
+
+// 公开导出供 CLI 使用
+pub mod models;
+pub mod modules;
+pub mod utils;
+pub mod proxy;
 pub mod error;
 
 use tauri::Manager;
