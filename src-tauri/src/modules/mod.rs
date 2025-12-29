@@ -5,10 +5,14 @@ pub mod logger;
 pub mod db;
 pub mod process;
 pub mod oauth;
-pub mod oauth_server;
 pub mod migration;
-pub mod tray;
 pub mod i18n;
+
+// GUI 专用模块
+#[cfg(feature = "gui")]
+pub mod tray;
+#[cfg(feature = "gui")]
+pub mod oauth_server;
 
 use crate::models;
 
