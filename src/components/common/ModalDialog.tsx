@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle, XCircle, Info } from 'lucide-react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 
 export type ModalType = 'confirm' | 'success' | 'error' | 'info';
 
@@ -22,10 +23,14 @@ export default function ModalDialog({
     type = 'confirm',
     onConfirm,
     onCancel,
-    confirmText = '确定',
-    cancelText = '取消',
+    confirmText,
+    cancelText,
     isDestructive = false
 }: ModalDialogProps) {
+    const { t } = useTranslation();
+    const finalConfirmText = confirmText || t('common.confirm');
+    const finalCancelText = cancelText || t('common.cancel');
+
     if (!isOpen) return null;
 
     const getIcon = () => {
@@ -73,7 +78,7 @@ export default function ModalDialog({
                                 className="flex-1 px-4 py-2.5 bg-gray-100 dark:bg-base-200 text-gray-700 dark:text-gray-300 font-medium rounded-xl hover:bg-gray-200 dark:hover:bg-base-300 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-200 dark:focus:ring-base-300"
                                 onClick={onCancel}
                             >
-                                {cancelText}
+                                {finalCancelText}
                             </button>
                         )}
                         <button
@@ -83,7 +88,7 @@ export default function ModalDialog({
                                 }`}
                             onClick={onConfirm}
                         >
-                            {confirmText}
+                            {finalConfirmText}
                         </button>
                     </div>
                 </div>

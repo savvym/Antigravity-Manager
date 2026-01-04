@@ -4,6 +4,16 @@ use std::fs;
 use std::path::PathBuf;
 use crate::modules::account::get_data_dir;
 
+// 自定义本地时区时间格式化器
+struct LocalTimer;
+
+impl tracing_subscriber::fmt::time::FormatTime for LocalTimer {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        let now = chrono::Local::now();
+        write!(w, "{}", now.to_rfc3339())
+    }
+}
+
 pub fn get_log_dir() -> Result<PathBuf, String> {
     let data_dir = get_data_dir()?;
     let log_dir = data_dir.join("logs");
@@ -33,20 +43,22 @@ pub fn init_logger() {
     let file_appender = tracing_appender::rolling::daily(log_dir, "app.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     
-    // 2. 终端输出层
+    // 2. 终端输出层（使用本地时区）
     let console_layer = fmt::Layer::new()
         .with_target(false)
         .with_thread_ids(false)
-        .with_level(true);
+        .with_level(true)
+        .with_timer(LocalTimer);
         
-    // 3. 文件输出层 (关闭 ANSI 格式化)
+    // 3. 文件输出层 (关闭 ANSI 格式化，使用本地时区)
     let file_layer = fmt::Layer::new()
         .with_writer(non_blocking)
         .with_ansi(false)
         .with_target(true)
-        .with_level(true);
+        .with_level(true)
+        .with_timer(LocalTimer);
 
-    // 4. 设置过滤层 (默认只记录 INFO 及以上级别)
+    // 4. 设置过滤层 (默认使用 INFO 级别以减少日志体积)
     let filter_layer = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info"));
 

@@ -27,7 +27,7 @@ pub fn store_thought_signature(sig: &str) {
         };
         
         if should_store {
-            tracing::info!("[ThoughtSig] 存储新签名 (长度: {}，替换旧长度: {:?})", 
+            tracing::debug!("[ThoughtSig] 存储新签名 (长度: {}，替换旧长度: {:?})", 
                 sig.len(), 
                 guard.as_ref().map(|s| s.len())
             );
@@ -38,15 +38,6 @@ pub fn store_thought_signature(sig: &str) {
                 guard.as_ref().map(|s| s.len()).unwrap_or(0)
             );
         }
-    }
-}
-
-/// 获取并清除全局存储的 thoughtSignature
-pub fn take_thought_signature() -> Option<String> {
-    if let Ok(mut guard) = get_thought_sig_storage().lock() {
-        guard.take()
-    } else {
-        None
     }
 }
 
@@ -88,7 +79,7 @@ pub fn create_openai_sse_stream(
 
                                 if let Ok(mut json) = serde_json::from_str::<Value>(json_part) {
                                     // Log raw chunk for debugging gemini-3 thoughts
-                                    tracing::info!("Gemini SSE Chunk: {}", json_part);
+                                    tracing::debug!("Gemini SSE Chunk: {}", json_part);
 
                                     // Handle v1internal wrapper if present
                                     let actual_data = if let Some(inner) = json.get_mut("response").map(|v| v.take()) {
@@ -110,8 +101,8 @@ pub fn create_openai_sse_stream(
                                                 content_out.push_str(text);
                                             }
                                             // Capture thought (Thinking Models)
-                                            if let Some(thought_text) = part.get("thought").and_then(|t| t.as_str()) {
-                                                 content_out.push_str(thought_text);
+                                            if let Some(_thought_text) = part.get("thought").and_then(|t| t.as_str()) {
+                                                 // content_out.push_str(thought_text);
                                             }
                                             // 捕获 thoughtSignature (Gemini 3 工具调用必需)
                                             if let Some(sig) = part.get("thoughtSignature").or(part.get("thought_signature")).and_then(|s| s.as_str()) {
@@ -254,10 +245,11 @@ pub fn create_legacy_sse_stream(
                                                 if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
                                                     content_out.push_str(text);
                                                 }
-                                                // Capture thought
+                                                /* 禁用思维链输出到正文
                                                 if let Some(thought_text) = part.get("thought").and_then(|t| t.as_str()) {
-                                                     content_out.push_str(thought_text);
+                                                    // // content_out.push_str(thought_text);
                                                 }
+                                                */
                                                 // 捕获 thoughtSignature
                                                 // 捕获 thoughtSignature 到全局存储
                                                 if let Some(sig) = part.get("thoughtSignature").or(part.get("thought_signature")).and_then(|s| s.as_str()) {
@@ -296,7 +288,7 @@ pub fn create_legacy_sse_stream(
                                     });
 
                                     let json_str = serde_json::to_string(&legacy_chunk).unwrap_or_default();
-                                    tracing::info!("Legacy Stream Chunk: {}", json_str); 
+                                    tracing::debug!("Legacy Stream Chunk: {}", json_str); 
                                     let sse_out = format!("data: {}\n\n", json_str);
                                     yield Ok::<Bytes, String>(Bytes::from(sse_out));
                                 }
@@ -307,7 +299,7 @@ pub fn create_legacy_sse_stream(
                 Err(e) => yield Err(format!("Upstream error: {}", e)),
             }
         }
-        tracing::info!("Stream finished. Yielding [DONE]");
+        tracing::debug!("Stream finished. Yielding [DONE]");
         yield Ok::<Bytes, String>(Bytes::from("data: [DONE]\n\n"));
         // Final flush delay
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -318,7 +310,7 @@ pub fn create_legacy_sse_stream(
 
 pub fn create_codex_sse_stream(
     mut gemini_stream: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
-    model: String,
+    _model: String,
 ) -> Pin<Box<dyn Stream<Item = Result<Bytes, String>> + Send>> {
     let mut buffer = BytesMut::new();
     
@@ -388,15 +380,16 @@ pub fn create_codex_sse_stream(
                                                     let clean_text = text.replace('“', "\"").replace('”', "\"");
                                                     delta_text.push_str(&clean_text);
                                                 }
-                                                // Capture thought
+                                                /* 禁用思维链输出到正文
                                                 if let Some(thought_text) = part.get("thought").and_then(|t| t.as_str()) {
                                                     let clean_thought = thought_text.replace('"', "\"").replace('"', "\"");
-                                                    delta_text.push_str(&clean_thought);
+                                                    // delta_text.push_str(&clean_thought);
                                                 }
+                                                */
                                                 // 捕获 thoughtSignature (Gemini 3 工具调用必需)
                                                 // 存储到全局状态，不再嵌入到用户可见的文本中
                                                 if let Some(sig) = part.get("thoughtSignature").or(part.get("thought_signature")).and_then(|s| s.as_str()) {
-                                                    tracing::info!("[Codex-SSE] 捕获 thoughtSignature (长度: {})", sig.len());
+                                                    tracing::debug!("[Codex-SSE] 捕获 thoughtSignature (长度: {})", sig.len());
                                                     store_thought_signature(sig);
                                                 }
                                                 // Handle function call in chunk with deduplication
@@ -405,9 +398,8 @@ pub fn create_codex_sse_stream(
                                                     if !emitted_tool_calls.contains(&call_key) {
                                                         emitted_tool_calls.insert(call_key);
 
-                                                        let name = func_call.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
-                                                        let args = func_call.get("args").unwrap_or(&json!({})).to_string();
-                                                        
+                                                                                let name = func_call.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
+                                                                                let _args = func_call.get("args").unwrap_or(&json!({})).to_string();                                                        
                                                         // Stable ID generation based on hashed content to be consistent
                                                         let mut hasher = std::collections::hash_map::DefaultHasher::new();
                                                         use std::hash::{Hash, Hasher};
@@ -426,13 +418,13 @@ pub fn create_codex_sse_stream(
                                                         // 使用 Option 来允许某些情况跳过工具调用
                                                         let maybe_item_added_ev: Option<Value> = if name_str == "shell" || name_str == "local_shell" {
                                                             // Map to local_shell_call
-                                                            tracing::info!("[Debug] func_call: {}", serde_json::to_string(&func_call).unwrap_or_default());
-                                                            tracing::info!("[Debug] args_obj: {}", serde_json::to_string(&args_obj).unwrap_or_default());
+                                                            tracing::debug!("[Debug] func_call: {}", serde_json::to_string(&func_call).unwrap_or_default());
+                                                            tracing::debug!("[Debug] args_obj: {}", serde_json::to_string(&args_obj).unwrap_or_default());
                                                             
                                                             // 解析命令：支持数组格式、字符串格式，以及空 args 情况
                                                             let cmd_vec: Vec<String> = if args_obj.as_object().map(|o| o.is_empty()).unwrap_or(true) {
                                                                 // args 为空时使用静默成功命令，避免任务中断
-                                                                tracing::warn!("shell command args 为空，使用静默成功命令继续流程");
+                                                                tracing::debug!("shell command args 为空，使用静默成功命令继续流程");
                                                                 vec!["powershell.exe".to_string(), "-Command".to_string(), "exit 0".to_string()]
                                                             } else if let Some(arr) = args_obj.get("command").and_then(|v| v.as_array()) {
                                                                 // 数组格式
@@ -446,11 +438,11 @@ pub fn create_codex_sse_stream(
                                                                 }
                                                             } else {
                                                                 // command 字段缺失，使用静默成功命令
-                                                                tracing::warn!("shell command 缺少 command 字段，使用静默成功命令");
+                                                                tracing::debug!("shell command 缺少 command 字段，使用静默成功命令");
                                                                 vec!["powershell.exe".to_string(), "-Command".to_string(), "exit 0".to_string()]
                                                             };
                                                             
-                                                            tracing::info!("Shell 命令解析: {:?}", cmd_vec);
+                                                            tracing::debug!("Shell 命令解析: {:?}", cmd_vec);
                                                             Some(json!({
                                                                 "type": "response.output_item.added",
                                                                 "item": {
@@ -669,7 +661,7 @@ pub fn create_codex_sse_stream(
                                                             if let Some(raw_cmd) = json_str.get(val_start_abs..last_quote_idx) {
                                                                 detected_cmd_type = "shell";
                                                                 detected_cmd_val = Some(json!([raw_cmd]));
-                                                                tracing::warn!("SSOP: Recovered malformed JSON command: {}", raw_cmd);
+                                                                tracing::debug!("SSOP: Recovered malformed JSON command: {}", raw_cmd);
                                                                 break;
                                                             }
                                                         }
@@ -724,7 +716,7 @@ pub fn create_codex_sse_stream(
                         vec!["powershell".to_string(), "-EncodedCommand".to_string(), b64]
                     };
 
-                     tracing::info!("SSOP: Detected Shell Command in Text, Injecting Event: {:?}", final_cmd_vec);
+                     tracing::debug!("SSOP: Detected Shell Command in Text, Injecting Event: {:?}", final_cmd_vec);
 
                      // Emit added
                      let item_added_ev = json!({

@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { request as invoke } from '../utils/request';
 import { Account, QuotaData } from '../types/account';
 
 // 检查 Tauri 环境
@@ -104,4 +104,16 @@ export async function importFromCustomDb(path: string): Promise<Account> {
 
 export async function syncAccountFromDb(): Promise<Account | null> {
     return await invoke('sync_account_from_db');
+}
+
+export async function toggleProxyStatus(accountId: string, enable: boolean, reason?: string): Promise<void> {
+    return await invoke('toggle_proxy_status', { accountId, enable, reason });
+}
+
+/**
+ * 重新排序账号列表
+ * @param accountIds 按新顺序排列的账号ID数组
+ */
+export async function reorderAccounts(accountIds: string[]): Promise<void> {
+    return await invoke('reorder_accounts', { accountIds });
 }

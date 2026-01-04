@@ -68,13 +68,96 @@ pub fn map_claude_model_to_gemini(input: &str) -> String {
     "claude-sonnet-4-5".to_string()
 }
 
+/// 获取所有内置支持的模型列表关键字
+pub fn get_supported_models() -> Vec<String> {
+    CLAUDE_TO_GEMINI.keys().map(|s| s.to_string()).collect()
+}
+
+/// 动态获取所有可用模型列表 (包含内置与用户自定义)
+pub async fn get_all_dynamic_models(
+    openai_mapping: &tokio::sync::RwLock<std::collections::HashMap<String, String>>,
+    custom_mapping: &tokio::sync::RwLock<std::collections::HashMap<String, String>>,
+    anthropic_mapping: &tokio::sync::RwLock<std::collections::HashMap<String, String>>,
+) -> Vec<String> {
+    use std::collections::HashSet;
+    let mut model_ids = HashSet::new();
+
+    // 1. 获取所有内置映射模型
+    for m in get_supported_models() {
+        model_ids.insert(m);
+    }
+
+    // 2. 获取所有自定义映射模型 (OpenAI)
+    {
+        let mapping = openai_mapping.read().await;
+        for key in mapping.keys() {
+            if !key.ends_with("-series") {
+                 model_ids.insert(key.clone());
+            }
+        }
+    }
+
+    // 3. 获取所有自定义映射模型 (Custom)
+    {
+        let mapping = custom_mapping.read().await;
+        for key in mapping.keys() {
+            model_ids.insert(key.clone());
+        }
+    }
+
+    // 4. 获取所有 Anthropic 映射模型
+    {
+        let mapping = anthropic_mapping.read().await;
+        for key in mapping.keys() {
+            if !key.ends_with("-series") && key != "claude-default" {
+                model_ids.insert(key.clone());
+            }
+        }
+    }
+
+    // 5. 确保包含常用的 Gemini/画画模型 ID
+    model_ids.insert("gemini-3-pro-low".to_string());
+    
+    // [NEW] Issue #247: Dynamically generate all Image Gen Combinations
+    let base = "gemini-3-pro-image";
+    let resolutions = vec!["", "-2k", "-4k"];
+    let ratios = vec!["", "-1x1", "-4x3", "-3x4", "-16x9", "-9x16", "-21x9"];
+    
+    for res in resolutions {
+        for ratio in ratios.iter() {
+            let mut id = base.to_string();
+            id.push_str(res);
+            id.push_str(ratio);
+            model_ids.insert(id);
+        }
+    }
+
+    model_ids.insert("gemini-2.0-flash-exp".to_string());
+    model_ids.insert("gemini-2.5-flash".to_string());
+    model_ids.insert("gemini-2.5-pro".to_string());
+    model_ids.insert("gemini-3-flash".to_string());
+    model_ids.insert("gemini-3-pro-high".to_string());
+    model_ids.insert("gemini-3-pro-low".to_string());
+
+
+    let mut sorted_ids: Vec<_> = model_ids.into_iter().collect();
+    sorted_ids.sort();
+    sorted_ids
+}
+
 /// 核心模型路由解析引擎
 /// 优先级：Custom Mapping (精确) > Group Mapping (家族) > System Mapping (内置插件)
+/// 
+/// # 参数
+/// - `apply_claude_family_mapping`: 是否对 Claude 模型应用家族映射
+///   - `true`: CLI 请求，应用家族映射（如 claude-sonnet-4-5 -> gemini-3-pro-high）
+///   - `false`: 非 CLI 请求（如 Cherry Studio），跳过家族映射，直接穿透
 pub fn resolve_model_route(
     original_model: &str,
     custom_mapping: &std::collections::HashMap<String, String>,
     openai_mapping: &std::collections::HashMap<String, String>,
     anthropic_mapping: &std::collections::HashMap<String, String>,
+    apply_claude_family_mapping: bool,
 ) -> String {
     // 1. 检查自定义精确映射 (优先级最高)
     if let Some(target) = custom_mapping.get(original_model) {
@@ -117,6 +200,26 @@ pub fn resolve_model_route(
 
     // 3. 检查家族分组映射 (Anthropic 系)
     if lower_model.starts_with("claude-") {
+        // [CRITICAL] 检查是否应用 Claude 家族映射
+        // 如果是非 CLI 请求（如 Cherry Studio），先检查是否为原生支持的直通模型
+        if !apply_claude_family_mapping {
+            if let Some(mapped) = CLAUDE_TO_GEMINI.get(original_model) {
+                if *mapped == original_model {
+                    // 原生支持的直通模型，跳过家族映射
+                    crate::modules::logger::log_info(&format!("[Router] 非 CLI 请求，跳过家族映射: {}", original_model));
+                    return original_model.to_string();
+                }
+            }
+        }
+        
+        // [NEW] Haiku 智能降级策略
+        // 将所有 Haiku 模型自动降级到 gemini-2.5-flash-lite (最轻量/便宜的模型)
+        // [FIX] 仅在 CLI 模式下生效 (apply_claude_family_mapping == true)
+        if apply_claude_family_mapping && lower_model.contains("haiku") {
+            crate::modules::logger::log_info(&format!("[Router] Haiku 智能降级 (CLI): {} -> gemini-2.5-flash-lite", original_model));
+            return "gemini-2.5-flash-lite".to_string();
+        }
+
         let family_key = if lower_model.contains("4-5") || lower_model.contains("4.5") {
             "claude-4.5-series"
         } else if lower_model.contains("3-5") || lower_model.contains("3.5") {

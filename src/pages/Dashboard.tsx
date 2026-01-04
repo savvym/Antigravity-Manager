@@ -7,7 +7,7 @@ import CurrentAccount from '../components/dashboard/CurrentAccount';
 import BestAccounts from '../components/dashboard/BestAccounts';
 import AddAccountDialog from '../components/accounts/AddAccountDialog';
 import { save } from '@tauri-apps/plugin-dialog';
-import { invoke } from '@tauri-apps/api/core';
+import { request as invoke } from '../utils/request';
 import { showToast } from '../components/common/ToastContainer';
 import { Account } from '../types/account';
 
@@ -45,6 +45,7 @@ function Dashboard() {
             .filter(q => q > 0);
 
         const lowQuotaCount = accounts.filter(a => {
+            if (a.quota?.is_forbidden) return false;
             const gemini = a.quota?.models.find(m => m.name.toLowerCase() === 'gemini-3-pro-high')?.percentage || 0;
             const claude = a.quota?.models.find(m => m.name.toLowerCase() === 'claude-sonnet-4-5')?.percentage || 0;
             return gemini < 20 || claude < 20;

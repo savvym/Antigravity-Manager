@@ -26,6 +26,9 @@ pub struct ClaudeRequest {
     pub thinking: Option<ThinkingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Metadata>,
+    /// Output configuration for effort level (Claude API v2.0.67+)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_config: Option<OutputConfig>,
 }
 
 /// Thinking 配置
@@ -83,7 +86,18 @@ pub enum ContentBlock {
     },
 
     #[serde(rename = "image")]
-    Image { source: ImageSource },
+    Image {
+        source: ImageSource,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<serde_json::Value>,
+    },
+
+    #[serde(rename = "document")]
+    Document {
+        source: DocumentSource,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<serde_json::Value>,
+    },
 
     #[serde(rename = "tool_use")]
     ToolUse {
@@ -129,6 +143,14 @@ pub struct ImageSource {
     pub data: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentSource {
+    #[serde(rename = "type")]
+    pub source_type: String, // "base64"
+    pub media_type: String,  // e.g. "application/pdf"
+    pub data: String,        // base64 data
+}
+
 /// Tool - supports both client tools (with input_schema) and server tools (like web_search)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tool {
@@ -165,6 +187,7 @@ impl Tool {
     }
 
     /// Get the effective tool name
+    #[allow(dead_code)]
     pub fn get_name(&self) -> String {
         self.name.clone().unwrap_or_else(|| {
             // For server tools, derive name from type
@@ -183,6 +206,15 @@ impl Tool {
 pub struct Metadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_id: Option<String>,
+}
+
+/// Output Configuration (Claude API v2.0.67+)
+/// Controls effort level for model reasoning
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutputConfig {
+    /// Effort level: "high", "medium", "low"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
 }
 
 /// Claude API 响应
@@ -205,6 +237,10 @@ pub struct ClaudeResponse {
 pub struct Usage {
     pub input_tokens: u32,
     pub output_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_tool_use: Option<serde_json::Value>,
 }
@@ -309,6 +345,9 @@ pub struct UsageMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "totalTokenCount")]
     pub total_token_count: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "cachedContentTokenCount")]
+    pub cached_content_token_count: Option<u32>,
 }
 
 // ========== Grounding Metadata (for googleSearch results) ==========

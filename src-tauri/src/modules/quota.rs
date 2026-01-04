@@ -4,7 +4,6 @@ use serde_json::json;
 use crate::models::QuotaData;
 
 const QUOTA_API_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels";
-const LOAD_PROJECT_API_URL: &str = "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist";
 const USER_AGENT: &str = "antigravity/1.11.3 Darwin/arm64";
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -39,9 +38,12 @@ struct LoadProjectResponse {
 #[derive(Debug, Deserialize)]
 struct Tier {
     id: Option<String>,
+    #[allow(dead_code)]
     #[serde(rename = "quotaTier")]
     quota_tier: Option<String>,
+    #[allow(dead_code)]
     name: Option<String>,
+    #[allow(dead_code)]
     slug: Option<String>,
 }
 
@@ -123,8 +125,6 @@ pub async fn fetch_quota_inner(access_token: &str, email: &str) -> crate::error:
     let max_retries = 3;
     let mut last_error: Option<AppError> = None;
 
-    crate::modules::logger::log_info(&format!("发送配额请求至 {}", url));
-
     for attempt in 1..=max_retries {
         match client
             .post(url)
@@ -170,10 +170,10 @@ pub async fn fetch_quota_inner(access_token: &str, email: &str) -> crate::error:
                 
                 let mut quota_data = QuotaData::new();
                 
-                crate::modules::logger::log_info(&format!("Quota API 返回了 {} 个模型:", quota_response.models.len()));
+                // 使用 debug 级别记录详细信息，避免控制台噪音
+                tracing::debug!("Quota API 返回了 {} 个模型", quota_response.models.len());
 
                 for (name, info) in quota_response.models {
-                    crate::modules::logger::log_info(&format!("   - {}", name));
                     if let Some(quota_info) = info.quota_info {
                         let percentage = quota_info.remaining_fraction
                             .map(|f| (f * 100.0) as i32)

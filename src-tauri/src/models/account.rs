@@ -9,6 +9,24 @@ pub struct Account {
     pub name: Option<String>,
     pub token: TokenData,
     pub quota: Option<QuotaData>,
+    /// Disabled accounts are ignored by the proxy token pool (e.g. revoked refresh_token -> invalid_grant).
+    #[serde(default)]
+    pub disabled: bool,
+    /// Optional human-readable reason for disabling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled_reason: Option<String>,
+    /// Unix timestamp when the account was disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled_at: Option<i64>,
+    /// User manually disabled proxy feature (does not affect app usage).
+    #[serde(default)]
+    pub proxy_disabled: bool,
+    /// Optional human-readable reason for proxy disabling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_disabled_reason: Option<String>,
+    /// Unix timestamp when the proxy was disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_disabled_at: Option<i64>,
     pub created_at: i64,
     pub last_used: i64,
 }
@@ -22,6 +40,12 @@ impl Account {
             name: None,
             token,
             quota: None,
+            disabled: false,
+            disabled_reason: None,
+            disabled_at: None,
+            proxy_disabled: false,
+            proxy_disabled_reason: None,
+            proxy_disabled_at: None,
             created_at: now,
             last_used: now,
         }

@@ -208,8 +208,20 @@ pub fn upsert_account(email: String, name: Option<String>, token: TokenData) -> 
         // 更新现有账号
         match load_account(&account_id) {
             Ok(mut account) => {
+                let old_access_token = account.token.access_token.clone();
+                let old_refresh_token = account.token.refresh_token.clone();
                 account.token = token;
                 account.name = name.clone();
+                // If an account was previously disabled (e.g. invalid_grant), any explicit token upsert
+                // should re-enable it (user manually updated credentials in the UI).
+                if account.disabled
+                    && (account.token.refresh_token != old_refresh_token
+                        || account.token.access_token != old_access_token)
+                {
+                    account.disabled = false;
+                    account.disabled_reason = None;
+                    account.disabled_at = None;
+                }
                 account.update_last_used();
                 save_account(&account)?;
                 
@@ -307,6 +319,40 @@ pub fn delete_accounts(account_ids: &[String]) -> Result<(), String> {
     if index.current_account_id.is_none() {
         index.current_account_id = index.accounts.first().map(|s| s.id.clone());
     }
+    
+    save_account_index(&index)
+}
+
+/// 重新排序账号列表
+/// 根据传入的账号ID顺序更新索引文件中的账号排列顺序
+pub fn reorder_accounts(account_ids: &[String]) -> Result<(), String> {
+    let _lock = ACCOUNT_INDEX_LOCK.lock().map_err(|e| format!("获取锁失败: {}", e))?;
+    let mut index = load_account_index()?;
+    
+    // 创建一个映射，记录每个账号ID对应的摘要信息
+    let id_to_summary: std::collections::HashMap<_, _> = index.accounts
+        .iter()
+        .map(|s| (s.id.clone(), s.clone()))
+        .collect();
+    
+    // 按照新顺序重建账号列表
+    let mut new_accounts = Vec::new();
+    for id in account_ids {
+        if let Some(summary) = id_to_summary.get(id) {
+            new_accounts.push(summary.clone());
+        }
+    }
+    
+    // 添加未在新顺序中出现的账号（保持原有顺序追加到末尾）
+    for summary in &index.accounts {
+        if !account_ids.contains(&summary.id) {
+            new_accounts.push(summary.clone());
+        }
+    }
+    
+    index.accounts = new_accounts;
+    
+    crate::modules::logger::log_info(&format!("账号顺序已更新，共 {} 个账号", index.accounts.len()));
     
     save_account_index(&index)
 }
@@ -430,7 +476,22 @@ pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppR
     use reqwest::StatusCode;
     
     // 1. 基于时间的检查 (Time-based check) - 先确保 Token 有效
-    let token = oauth::ensure_fresh_token(&account.token).await.map_err(AppError::OAuth)?;
+    let token = match oauth::ensure_fresh_token(&account.token).await {
+        Ok(t) => t,
+        Err(e) => {
+            if e.contains("invalid_grant") {
+                modules::logger::log_error(&format!(
+                    "Disabling account {} due to invalid_grant during token refresh (quota check)",
+                    account.email
+                ));
+                account.disabled = true;
+                account.disabled_at = Some(chrono::Utc::now().timestamp());
+                account.disabled_reason = Some(format!("invalid_grant: {}", e));
+                let _ = save_account(account);
+            }
+            return Err(AppError::OAuth(e));
+        }
+    };
     
     if token.access_token != account.token.access_token {
         modules::logger::log_info(&format!("基于时间的 Token 刷新: {}", account.email));
@@ -491,9 +552,22 @@ pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppR
                 modules::logger::log_warn(&format!("401 Unauthorized for {}, forcing refresh...", account.email));
                 
                 // 强制刷新
-                let token_res = oauth::refresh_access_token(&account.token.refresh_token)
-                    .await
-                    .map_err(AppError::OAuth)?;
+                let token_res = match oauth::refresh_access_token(&account.token.refresh_token).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        if e.contains("invalid_grant") {
+                            modules::logger::log_error(&format!(
+                                "Disabling account {} due to invalid_grant during forced refresh (quota check)",
+                                account.email
+                            ));
+                            account.disabled = true;
+                            account.disabled_at = Some(chrono::Utc::now().timestamp());
+                            account.disabled_reason = Some(format!("invalid_grant: {}", e));
+                            let _ = save_account(account);
+                        }
+                        return Err(AppError::OAuth(e));
+                    }
+                };
                 
                 let new_token = TokenData::new(
                     token_res.access_token.clone(),

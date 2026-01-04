@@ -4,6 +4,12 @@ export interface Account {
     name?: string;
     token: TokenData;
     quota?: QuotaData;
+    disabled?: boolean;
+    disabled_reason?: string;
+    disabled_at?: number;
+    proxy_disabled?: boolean;
+    proxy_disabled_reason?: string;
+    proxy_disabled_at?: number;
     created_at: number;
     last_used: number;
 }

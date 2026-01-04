@@ -36,13 +36,13 @@ pub fn resolve_request_config(
     // 检测是否有联网工具定义 (内置功能调用)
     let has_networking_tool = detects_networking_tool(tools);
     // 检测是否包含非联网工具 (如 MCP 本地工具)
-    let has_non_networking = contains_non_networking_tool(tools);
+    let _has_non_networking = contains_non_networking_tool(tools);
 
     // Strip -online suffix from original model if present (to detect networking intent)
     let is_online_suffix = original_model.ends_with("-online");
     
     // High-quality grounding allowlist (Only for models known to support search and be relatively 'safe')
-    let is_high_quality_model = mapped_model == "gemini-2.5-flash"
+    let _is_high_quality_model = mapped_model == "gemini-2.5-flash"
         || mapped_model == "gemini-1.5-pro"
         || mapped_model.starts_with("gemini-1.5-pro-")
         || mapped_model.starts_with("gemini-2.5-flash-")
@@ -55,9 +55,9 @@ pub fn resolve_request_config(
         || mapped_model.contains("claude-4");
 
     // Determine if we should enable networking
-    // 策略优化：如果请求显式带了本地工具 (MCP)，哪怕是 Sonnet 等顶级模型，也不自动开启联网，防止触发 400 冲突。
-    // 除非用户显式通过 -online 后缀要求联网。
-    let enable_networking = is_online_suffix || (is_high_quality_model && !has_non_networking) || has_networking_tool;
+    // [FIX] 禁用基于模型的自动联网逻辑，防止图像请求被联网搜索结果覆盖。
+    // 仅在用户显式请求联网时启用：1) -online 后缀 2) 携带联网工具定义
+    let enable_networking = is_online_suffix || has_networking_tool;
 
     // The final model to send upstream should be the MAPPED model, 
     // but if searching, we MUST ensure the model name is one the backend associates with search.
@@ -89,19 +89,23 @@ fn parse_image_config(model_name: &str) -> (Value, String) {
     let mut aspect_ratio = "1:1";
     let _image_size = "1024x1024"; // Default, not explicitly sent unless 4k/hd
 
-    if model_name.contains("-16x9") { aspect_ratio = "16:9"; }
-    else if model_name.contains("-9x16") { aspect_ratio = "9:16"; }
-    else if model_name.contains("-4x3") { aspect_ratio = "4:3"; }
-    else if model_name.contains("-3x4") { aspect_ratio = "3:4"; }
-    else if model_name.contains("-1x1") { aspect_ratio = "1:1"; }
+    if model_name.contains("-21x9") || model_name.contains("-21-9") { aspect_ratio = "21:9"; }
+    else if model_name.contains("-16x9") || model_name.contains("-16-9") { aspect_ratio = "16:9"; }
+    else if model_name.contains("-9x16") || model_name.contains("-9-16") { aspect_ratio = "9:16"; }
+    else if model_name.contains("-4x3") || model_name.contains("-4-3") { aspect_ratio = "4:3"; }
+    else if model_name.contains("-3x4") || model_name.contains("-3-4") { aspect_ratio = "3:4"; }
+    else if model_name.contains("-1x1") || model_name.contains("-1-1") { aspect_ratio = "1:1"; }
 
     let is_hd = model_name.contains("-4k") || model_name.contains("-hd");
+    let is_2k = model_name.contains("-2k");
 
     let mut config = serde_json::Map::new();
     config.insert("aspectRatio".to_string(), json!(aspect_ratio));
     
     if is_hd {
         config.insert("imageSize".to_string(), json!("4K"));
+    } else if is_2k {
+        config.insert("imageSize".to_string(), json!("2K"));
     }
 
     // The upstream model must be EXACTLY "gemini-3-pro-image"
@@ -120,7 +124,7 @@ pub fn inject_google_search_tool(body: &mut Value) {
             });
 
             if has_functions {
-                tracing::info!("Skipping googleSearch injection due to existing functionDeclarations");
+                tracing::debug!("Skipping googleSearch injection due to existing functionDeclarations");
                 return;
             }
 
@@ -261,10 +265,10 @@ mod tests {
 
     #[test]
     fn test_high_quality_model_auto_grounding() {
+        // Auto-grounding is currently disabled by default due to conflict with image gen
         let config = resolve_request_config("gpt-4o", "gemini-2.5-flash", &None);
-        assert_eq!(config.request_type, "web_search");
-        assert!(config.inject_google_search);
-        assert_eq!(config.final_model, "gemini-2.5-flash"); // 修正断言: final_model = mapped_model
+        assert_eq!(config.request_type, "agent");
+        assert!(!config.inject_google_search);
     }
 
     #[test]
@@ -297,5 +301,26 @@ mod tests {
         let config = resolve_request_config("gemini-3-pro-image", "gemini-3-pro-image", &None);
         assert_eq!(config.request_type, "image_gen");
         assert!(!config.inject_google_search);
+    }
+
+    #[test]
+    fn test_image_2k_and_ultrawide_config() {
+        // Test 2K
+        let (config_2k, _) = parse_image_config("gemini-3-pro-image-2k");
+        assert_eq!(config_2k["imageSize"], "2K");
+
+        // Test 21:9
+        let (config_21x9, _) = parse_image_config("gemini-3-pro-image-21x9");
+        assert_eq!(config_21x9["aspectRatio"], "21:9");
+
+        // Test Combined (if logic allows, though suffix parsing is greedy)
+         let (config_combined, _) = parse_image_config("gemini-3-pro-image-2k-21x9");
+         assert_eq!(config_combined["imageSize"], "2K");
+         assert_eq!(config_combined["aspectRatio"], "21:9");
+
+         // Test 4K + 21:9
+         let (config_4k_wide, _) = parse_image_config("gemini-3-pro-image-4k-21x9");
+         assert_eq!(config_4k_wide["imageSize"], "4K");
+         assert_eq!(config_4k_wide["aspectRatio"], "21:9");
     }
 }
