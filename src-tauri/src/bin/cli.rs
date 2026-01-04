@@ -394,9 +394,22 @@ async fn proxy_start(port: u16, lan: bool) -> Result<(), String> {
     println!("  - OpenAI: POST /v1/chat/completions");
     println!("  - Claude: POST /v1/messages");
     println!("  - Gemini: POST /v1beta/models/:model:generateContent");
+    if config.proxy.zai.enabled {
+        println!("  - z.ai: 已启用 ({})", config.proxy.zai.dispatch_mode_display());
+    }
     println!();
     println!("按 Ctrl+C 停止服务");
     println!();
+
+    // 创建安全配置
+    let security_config = proxy::ProxySecurityConfig::from_proxy_config(&config.proxy);
+
+    // 创建监控器 (CLI 模式下不传 app_handle)
+    let monitor = Arc::new(proxy::monitor::ProxyMonitor::new(1000, None));
+    if config.proxy.enable_logging {
+        monitor.set_enabled(true);
+        println!("监控日志: 已启用");
+    }
 
     // 启动服务器
     let (server, handle) = proxy::AxumServer::start(
@@ -408,6 +421,9 @@ async fn proxy_start(port: u16, lan: bool) -> Result<(), String> {
         config.proxy.custom_mapping.clone(),
         config.proxy.request_timeout,
         config.proxy.upstream_proxy.clone(),
+        security_config,
+        config.proxy.zai.clone(),
+        monitor,
     ).await?;
 
     // 等待 Ctrl+C

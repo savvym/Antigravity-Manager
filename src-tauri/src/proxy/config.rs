@@ -116,6 +116,18 @@ impl Default for ZaiConfig {
     }
 }
 
+impl ZaiConfig {
+    /// 返回调度模式的显示名称
+    pub fn dispatch_mode_display(&self) -> &'static str {
+        match self.dispatch_mode {
+            ZaiDispatchMode::Off => "关闭",
+            ZaiDispatchMode::Exclusive => "独占",
+            ZaiDispatchMode::Pooled => "池化",
+            ZaiDispatchMode::Fallback => "降级",
+        }
+    }
+}
+
 /// 反代服务配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyConfig {

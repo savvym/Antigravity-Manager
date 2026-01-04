@@ -1,6 +1,7 @@
 use serde::{Serialize, Deserialize};
 use std::collections::VecDeque;
 use tokio::sync::RwLock;
+#[cfg(feature = "gui")]
 use tauri::Emitter;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -32,10 +33,12 @@ pub struct ProxyMonitor {
     pub stats: RwLock<ProxyStats>,
     pub max_logs: usize,
     pub enabled: AtomicBool,
+    #[cfg(feature = "gui")]
     app_handle: Option<tauri::AppHandle>,
 }
 
 impl ProxyMonitor {
+    #[cfg(feature = "gui")]
     pub fn new(max_logs: usize, app_handle: Option<tauri::AppHandle>) -> Self {
         // Initialize DB
         if let Err(e) = crate::modules::proxy_db::init_db() {
@@ -48,6 +51,21 @@ impl ProxyMonitor {
             max_logs,
             enabled: AtomicBool::new(false), // Default to disabled
             app_handle,
+        }
+    }
+
+    #[cfg(not(feature = "gui"))]
+    pub fn new(max_logs: usize, _app_handle: Option<()>) -> Self {
+        // Initialize DB
+        if let Err(e) = crate::modules::proxy_db::init_db() {
+            tracing::error!("Failed to initialize proxy DB: {}", e);
+        }
+
+        Self {
+            logs: RwLock::new(VecDeque::with_capacity(max_logs)),
+            stats: RwLock::new(ProxyStats::default()),
+            max_logs,
+            enabled: AtomicBool::new(false), // Default to disabled
         }
     }
 
@@ -92,7 +110,8 @@ impl ProxyMonitor {
             }
         });
 
-        // Emit event
+        // Emit event (GUI only)
+        #[cfg(feature = "gui")]
         if let Some(app) = &self.app_handle {
              let _ = app.emit("proxy://request", &log);
         }
